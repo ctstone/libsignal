@@ -545,7 +545,7 @@ pub(crate) mod test {
             headers: vec![
                 format!("{}: {}", http::header::FORWARDED.as_str(), "1.1.1.1"),
                 format!("{}: {}", http::header::FORWARDED.as_str(), "2.2.2.2"),
-                format!("{}: {}", http::header::HOST.as_str(), " chat.signal.org "),
+                format!("{}: {}", http::header::HOST.as_str(), " jamb-dev-signal-server.ngrok.app "),
                 format!("{}: {}", http::header::USER_AGENT, ""),
             ],
             body: None,
@@ -569,7 +569,7 @@ pub(crate) mod test {
             values_to_vec(&response.headers, http::header::USER_AGENT)
         );
         assert_eq!(
-            vec!["chat.signal.org"],
+            vec!["jamb-dev-signal-server.ngrok.app"],
             values_to_vec(&response.headers, http::header::HOST)
         );
         assert_eq!(

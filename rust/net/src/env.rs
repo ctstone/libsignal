@@ -47,7 +47,7 @@ const DOMAIN_CONFIG_CHAT: DomainConfig = DomainConfig {
         ip_addr!(v6, "2600:9000:a61f:527c:d5eb:a431:5239:3232"),
     ],
     connect: ConnectionConfig {
-        hostname: "chat.signal.org",
+        hostname: "jamb-dev-signal-server.ngrok.app",
         port: DEFAULT_HTTPS_PORT,
         cert: SIGNAL_ROOT_CERTIFICATES,
         min_tls_version: Some(SslVersion::TLS1_3),
@@ -247,7 +247,7 @@ pub(crate) const KEYTRANS_CONFIG_PROD: KeyTransConfig = KeyTransConfig {
     auditor_key_material: KEYTRANS_AUDITOR_KEY_MATERIAL_PROD,
 };
 
-/// Configuration for a target network resource, like `chat.signal.org`.
+/// Configuration for a target network resource, like `jamb-dev-signal-server.ngrok.app`.
 #[derive(Clone)]
 pub struct DomainConfig {
     /// The portions of the config used during connection attempts.

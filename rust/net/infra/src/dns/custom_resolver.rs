@@ -616,7 +616,7 @@ pub(crate) mod test {
 
     fn test_request() -> DnsLookupRequest {
         DnsLookupRequest {
-            hostname: Arc::from("chat.signal.org"),
+            hostname: Arc::from("jamb-dev-signal-server.ngrok.app"),
             ipv6_enabled: true,
         }
     }
