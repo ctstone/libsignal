@@ -39,12 +39,20 @@ pub(crate) const CONNECTED_ELSEWHERE_CLOSE_CODE: u16 = 4409;
 
 const DOMAIN_CONFIG_CHAT: DomainConfig = DomainConfig {
     ip_v4: &[
+        ip_addr!(v4, "3.17.7.232"),
+        ip_addr!(v4, "3.134.125.175"),
         ip_addr!(v4, "3.13.191.225"),
+        ip_addr!(v4, "3.14.182.203"),
         ip_addr!(v4, "3.134.39.220"),
+        ip_addr!(v4, "3.22.30.40"),
     ],
     ip_v6: &[
-        ip_addr!(v6, "2600:1f16:d83:1202::6e:5"),
+        ip_addr!(v6, "2600:1f16:d83:1202::6e:2"),
+        ip_addr!(v6, "2600:1f16:d83:1200::6e:3"),
         ip_addr!(v6, "2600:1f16:d83:1201::6e:1"),
+        ip_addr!(v6, "2600:1f16:d83:1200::6e:0"),
+        ip_addr!(v6, "2600:1f16:d83:1201::6e:4"),
+        ip_addr!(v6, "2600:1f16:d83:1202::6e:5"),
     ],
     connect: ConnectionConfig {
         hostname: "jamb-dev-signal-server.ngrok.app",
