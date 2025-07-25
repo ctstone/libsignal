@@ -1,6 +1,8 @@
 ## Generate Key transparency keys:
 
 ```
+# TODO: are these valid? Found in https://github.com/signalapp/key-transparency-server/tree/main/cmd/generate-keys
+
 # Generate Ed25519 private key
 openssl genpkey -algorithm Ed25519 -out keytrans_signing.pem
 
