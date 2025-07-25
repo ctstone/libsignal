@@ -61,7 +61,7 @@ impl EndpointConnections {
         use_fallbacks: bool,
         enforce_minimum_tls: EnforceMinimumTls,
     ) -> Self {
-        log::info!("Sample log message showing we are using custom libsignal build")
+        log::info!("Sample log message showing we are using custom libsignal build");
         log::info!(
             "Creating endpoint connections (fallbacks {}) for {} and others",
             if use_fallbacks { "enabled" } else { "disabled" },
