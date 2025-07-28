@@ -57,7 +57,7 @@ const DOMAIN_CONFIG_CHAT: DomainConfig = DomainConfig {
     connect: ConnectionConfig {
         hostname: "jamb-dev-signal-server.ngrok.app",
         port: DEFAULT_HTTPS_PORT,
-        cert: SIGNAL_ROOT_CERTIFICATES,
+        cert: RootCertificates::Native,
         min_tls_version: Some(SslVersion::TLS1_3),
         confirmation_header_name: Some(TIMESTAMP_HEADER_NAME),
         proxy: Some(ConnectionProxyConfig {
