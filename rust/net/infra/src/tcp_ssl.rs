@@ -126,7 +126,7 @@ impl Connector<TcpRoute<IpAddr>, ()> for StatelessTcp {
 
 impl<Inner> Connector<TlsRouteFragment, Inner> for StatelessTls
 where
-    Inner: AsyncDuplexStream,
+    Inner: AsyncDuplexStream + std::fmt::Debug,
 {
     type Connection = tokio_boring_signal::SslStream<Inner>;
 
@@ -136,7 +136,7 @@ where
         &self,
         inner: Inner,
         fragment: TlsRouteFragment,
-        _log_tag: &str,
+        log_tag: &str,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>> + Send {
         let TlsRouteFragment {
             root_certs,
@@ -147,6 +147,7 @@ where
         let host = sni;
 
         let ssl_config = ssl_config(&root_certs, host.as_deref(), alpn, min_protocol_version);
+        let log_tag = log_tag.to_owned(); // Capture for the async block
 
         async move {
             let domain = match &host {
@@ -155,9 +156,25 @@ where
             };
             let ssl_config = ssl_config?;
 
-            tokio_boring_signal::connect(ssl_config, &domain, inner)
-                .await
-                .map_err(TransportConnectError::from)
+            // Detailed logging before SSL handshake attempt
+            log::debug!(
+                "[{log_tag}] Starting TLS handshake - SNI: {host:?}, ALPN: {alpn:?}, Domain: {domain:?}, Min Protocol: {min_protocol_version:?}"
+            );
+
+            let result = tokio_boring_signal::connect(ssl_config, &domain, inner).await;
+            
+            match &result {
+                Ok(_) => {
+                    log::debug!("[{log_tag}] TLS handshake successful for domain: {domain:?}");
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[{log_tag}] TLS handshake failed for domain: {domain:?}, SNI: {host:?}, ALPN: {alpn:?} - Error: {e:?}"
+                    );
+                }
+            }
+            
+            result.map_err(TransportConnectError::from)
         }
     }
 }
