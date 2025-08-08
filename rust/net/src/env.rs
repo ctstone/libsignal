@@ -39,23 +39,15 @@ pub(crate) const CONNECTED_ELSEWHERE_CLOSE_CODE: u16 = 4409;
 
 const DOMAIN_CONFIG_CHAT: DomainConfig = DomainConfig {
     ip_v4: &[
-        ip_addr!(v4, "3.17.7.232"),
-        ip_addr!(v4, "3.134.125.175"),
-        ip_addr!(v4, "3.13.191.225"),
-        ip_addr!(v4, "3.14.182.203"),
-        ip_addr!(v4, "3.134.39.220"),
-        ip_addr!(v4, "3.22.30.40"),
+        ip_addr!(v4, "216.24.57.251"),
+        ip_addr!(v4, "216.24.57.7"),
     ],
     ip_v6: &[
-        ip_addr!(v6, "2600:1f16:d83:1202::6e:2"),
-        ip_addr!(v6, "2600:1f16:d83:1200::6e:3"),
-        ip_addr!(v6, "2600:1f16:d83:1201::6e:1"),
-        ip_addr!(v6, "2600:1f16:d83:1200::6e:0"),
-        ip_addr!(v6, "2600:1f16:d83:1201::6e:4"),
-        ip_addr!(v6, "2600:1f16:d83:1202::6e:5"),
+        // Render does not support ipv6:
+        // https://render.com/docs/configure-cloudflare-dns
     ],
     connect: ConnectionConfig {
-        hostname: "jamb-dev-signal-server.ngrok.app",
+        hostname: "signal-server-dng3.onrender.com",
         port: DEFAULT_HTTPS_PORT,
         cert: RootCertificates::Native,
         min_tls_version: Some(SslVersion::TLS1_3),
