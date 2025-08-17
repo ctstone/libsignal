@@ -23,6 +23,8 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 #define SignalMEDIA_ID_LEN 15
 
+#define SignalBACKUP_FORWARD_SECRECY_TOKEN_LEN 32
+
 #define SignalMEDIA_ENCRYPTION_KEY_LEN (32 + 32)
 
 #define SignalBackupId_LEN 16
@@ -234,6 +236,7 @@ typedef enum {
   SignalErrorCodeSvrDataMissing = 160,
   SignalErrorCodeSvrRestoreFailed = 161,
   SignalErrorCodeSvrRotationMachineTooManySteps = 162,
+  SignalErrorCodeSvrRequestFailed = 163,
   SignalErrorCodeAppExpired = 170,
   SignalErrorCodeDeviceDeregistered = 171,
   SignalErrorCodeConnectionInvalidated = 172,
@@ -275,6 +278,10 @@ typedef struct SignalAes256GcmEncryption SignalAes256GcmEncryption;
 typedef struct SignalAes256GcmSiv SignalAes256GcmSiv;
 
 typedef struct SignalAuthenticatedChatConnection SignalAuthenticatedChatConnection;
+
+typedef struct SignalBackupRestoreResponse SignalBackupRestoreResponse;
+
+typedef struct SignalBackupStoreResponse SignalBackupStoreResponse;
 
 typedef struct SignalBridgedStringMap SignalBridgedStringMap;
 
@@ -611,6 +618,22 @@ typedef uint8_t SignalServiceIdFixedWidthBinaryBytes[17];
 typedef struct {
   SignalPrivateKey *raw;
 } SignalMutPointerPrivateKey;
+
+typedef struct {
+  SignalBackupRestoreResponse *raw;
+} SignalMutPointerBackupRestoreResponse;
+
+typedef struct {
+  const SignalBackupRestoreResponse *raw;
+} SignalConstPointerBackupRestoreResponse;
+
+typedef struct {
+  SignalBackupStoreResponse *raw;
+} SignalMutPointerBackupStoreResponse;
+
+typedef struct {
+  const SignalBackupStoreResponse *raw;
+} SignalConstPointerBackupStoreResponse;
 
 typedef struct {
   SignalBridgedStringMap *raw;
@@ -1252,6 +1275,38 @@ typedef struct {
   SignalUnidentifiedSenderMessageContent *raw;
 } SignalMutPointerUnidentifiedSenderMessageContent;
 
+typedef uint8_t SignalBackupKeyBytes[SignalBACKUP_KEY_LEN];
+
+/**
+ * A C callback used to report the results of Rust futures.
+ *
+ * cbindgen will produce independent C types like `SignalCPromisei32` and
+ * `SignalCPromiseProtocolAddress`.
+ *
+ * This derives Copy because it behaves like a C type; nevertheless, a promise should still only be
+ * completed once.
+ */
+typedef struct {
+  void (*complete)(SignalFfiError *error, const SignalMutPointerBackupRestoreResponse *result, const void *context);
+  const void *context;
+  SignalCancellationId cancellation_id;
+} SignalCPromiseMutPointerBackupRestoreResponse;
+
+/**
+ * A C callback used to report the results of Rust futures.
+ *
+ * cbindgen will produce independent C types like `SignalCPromisei32` and
+ * `SignalCPromiseProtocolAddress`.
+ *
+ * This derives Copy because it behaves like a C type; nevertheless, a promise should still only be
+ * completed once.
+ */
+typedef struct {
+  void (*complete)(SignalFfiError *error, const SignalMutPointerBackupStoreResponse *result, const void *context);
+  const void *context;
+  SignalCancellationId cancellation_id;
+} SignalCPromiseMutPointerBackupStoreResponse;
+
 typedef struct {
   SignalSenderCertificate *raw;
 } SignalMutPointerSenderCertificate;
@@ -1451,6 +1506,20 @@ SignalFfiError *signal_backup_key_derive_media_id(uint8_t (*out)[SignalMEDIA_ID_
 
 SignalFfiError *signal_backup_key_derive_thumbnail_transit_encryption_key(uint8_t (*out)[SignalMEDIA_ENCRYPTION_KEY_LEN], const uint8_t (*backup_key)[SignalBACKUP_KEY_LEN], const uint8_t (*media_id)[SignalMEDIA_ID_LEN]);
 
+SignalFfiError *signal_backup_restore_response_destroy(SignalMutPointerBackupRestoreResponse p);
+
+SignalFfiError *signal_backup_restore_response_get_forward_secrecy_token(uint8_t (*out)[SignalBACKUP_FORWARD_SECRECY_TOKEN_LEN], SignalConstPointerBackupRestoreResponse response);
+
+SignalFfiError *signal_backup_restore_response_get_next_backup_secret_data(SignalOwnedBuffer *out, SignalConstPointerBackupRestoreResponse response);
+
+SignalFfiError *signal_backup_store_response_destroy(SignalMutPointerBackupStoreResponse p);
+
+SignalFfiError *signal_backup_store_response_get_forward_secrecy_token(uint8_t (*out)[SignalBACKUP_FORWARD_SECRECY_TOKEN_LEN], SignalConstPointerBackupStoreResponse response);
+
+SignalFfiError *signal_backup_store_response_get_next_backup_secret_data(SignalOwnedBuffer *out, SignalConstPointerBackupStoreResponse response);
+
+SignalFfiError *signal_backup_store_response_get_opaque_metadata(SignalOwnedBuffer *out, SignalConstPointerBackupStoreResponse response);
+
 SignalFfiError *signal_bridged_string_map_clone(SignalMutPointerBridgedStringMap *new_obj, SignalConstPointerBridgedStringMap obj);
 
 SignalFfiError *signal_bridged_string_map_destroy(SignalMutPointerBridgedStringMap p);
@@ -1556,10 +1625,6 @@ SignalFfiError *signal_create_call_link_credential_request_context_receive_respo
 SignalFfiError *signal_create_call_link_credential_request_issue_deterministic(SignalOwnedBuffer *out, SignalBorrowedBuffer request_bytes, const SignalServiceIdFixedWidthBinaryBytes *user_id, uint64_t timestamp, SignalBorrowedBuffer params_bytes, const uint8_t (*randomness)[SignalRANDOMNESS_LEN]);
 
 SignalFfiError *signal_create_call_link_credential_response_check_valid_contents(SignalBorrowedBuffer response_bytes);
-
-SignalFfiError *signal_create_otp(const char **out, const char *username, SignalBorrowedBuffer secret);
-
-SignalFfiError *signal_create_otp_from_base64(const char **out, const char *username, const char *secret);
 
 SignalFfiError *signal_decrypt_message(SignalOwnedBuffer *out, SignalConstPointerSignalMessage message, SignalConstPointerProtocolAddress protocol_address, SignalConstPointerFfiSessionStoreStruct session_store, SignalConstPointerFfiIdentityKeyStoreStruct identity_key_store);
 
@@ -1773,7 +1838,7 @@ SignalFfiError *signal_key_transparency_distinguished(SignalCPromiseOwnedBufferO
 
 SignalFfiError *signal_key_transparency_e164_search_key(SignalOwnedBuffer *out, const char *e164);
 
-SignalFfiError *signal_key_transparency_monitor(SignalCPromiseOwnedBufferOfc_uchar *promise, SignalConstPointerTokioAsyncContext async_runtime, uint8_t environment, SignalConstPointerUnauthenticatedChatConnection chat_connection, const SignalServiceIdFixedWidthBinaryBytes *aci, SignalConstPointerPublicKey aci_identity_key, const char *e164, SignalOptionalBorrowedSliceOfc_uchar unidentified_access_key, SignalOptionalBorrowedSliceOfc_uchar username_hash, SignalOptionalBorrowedSliceOfc_uchar account_data, SignalBorrowedBuffer last_distinguished_tree_head);
+SignalFfiError *signal_key_transparency_monitor(SignalCPromiseOwnedBufferOfc_uchar *promise, SignalConstPointerTokioAsyncContext async_runtime, uint8_t environment, SignalConstPointerUnauthenticatedChatConnection chat_connection, const SignalServiceIdFixedWidthBinaryBytes *aci, SignalConstPointerPublicKey aci_identity_key, const char *e164, SignalOptionalBorrowedSliceOfc_uchar unidentified_access_key, SignalOptionalBorrowedSliceOfc_uchar username_hash, SignalOptionalBorrowedSliceOfc_uchar account_data, SignalBorrowedBuffer last_distinguished_tree_head, bool is_self_monitor);
 
 SignalFfiError *signal_key_transparency_search(SignalCPromiseOwnedBufferOfc_uchar *promise, SignalConstPointerTokioAsyncContext async_runtime, uint8_t environment, SignalConstPointerUnauthenticatedChatConnection chat_connection, const SignalServiceIdFixedWidthBinaryBytes *aci, SignalConstPointerPublicKey aci_identity_key, const char *e164, SignalOptionalBorrowedSliceOfc_uchar unidentified_access_key, SignalOptionalBorrowedSliceOfc_uchar username_hash, SignalOptionalBorrowedSliceOfc_uchar account_data, SignalBorrowedBuffer last_distinguished_tree_head);
 
@@ -1843,9 +1908,9 @@ SignalFfiError *signal_lookup_request_set_token(SignalConstPointerLookupRequest 
 
 SignalFfiError *signal_message_backup_key_destroy(SignalMutPointerMessageBackupKey p);
 
-SignalFfiError *signal_message_backup_key_from_account_entropy_pool(SignalMutPointerMessageBackupKey *out, const char *account_entropy, const SignalServiceIdFixedWidthBinaryBytes *aci);
+SignalFfiError *signal_message_backup_key_from_account_entropy_pool(SignalMutPointerMessageBackupKey *out, const char *account_entropy, const SignalServiceIdFixedWidthBinaryBytes *aci, const uint8_t (*forward_secrecy_token)[SignalBACKUP_FORWARD_SECRECY_TOKEN_LEN]);
 
-SignalFfiError *signal_message_backup_key_from_backup_key_and_backup_id(SignalMutPointerMessageBackupKey *out, const uint8_t (*backup_key)[32], const uint8_t (*backup_id)[16]);
+SignalFfiError *signal_message_backup_key_from_backup_key_and_backup_id(SignalMutPointerMessageBackupKey *out, const uint8_t (*backup_key)[32], const uint8_t (*backup_id)[16], const uint8_t (*forward_secrecy_token)[SignalBACKUP_FORWARD_SECRECY_TOKEN_LEN]);
 
 SignalFfiError *signal_message_backup_key_get_aes_key(uint8_t (*out)[32], SignalConstPointerMessageBackupKey key);
 
@@ -2184,6 +2249,14 @@ SignalFfiError *signal_sealed_sender_multi_recipient_message_for_single_recipien
 SignalFfiError *signal_sealed_session_cipher_decrypt_to_usmc(SignalMutPointerUnidentifiedSenderMessageContent *out, SignalBorrowedBuffer ctext, SignalConstPointerFfiIdentityKeyStoreStruct identity_store);
 
 SignalFfiError *signal_sealed_session_cipher_encrypt(SignalOwnedBuffer *out, SignalConstPointerProtocolAddress destination, SignalConstPointerUnidentifiedSenderMessageContent content, SignalConstPointerFfiIdentityKeyStoreStruct identity_key_store);
+
+SignalFfiError *signal_secure_value_recovery_for_backups_create_new_backup_chain(SignalOwnedBuffer *out, uint8_t environment, const SignalBackupKeyBytes *backup_key);
+
+SignalFfiError *signal_secure_value_recovery_for_backups_remove_backup(SignalCPromisebool *promise, SignalConstPointerTokioAsyncContext async_runtime, SignalConstPointerConnectionManager connection_manager, const char *username, const char *password);
+
+SignalFfiError *signal_secure_value_recovery_for_backups_restore_backup_from_server(SignalCPromiseMutPointerBackupRestoreResponse *promise, SignalConstPointerTokioAsyncContext async_runtime, const SignalBackupKeyBytes *backup_key, SignalBorrowedBuffer metadata, SignalConstPointerConnectionManager connection_manager, const char *username, const char *password);
+
+SignalFfiError *signal_secure_value_recovery_for_backups_store_backup(SignalCPromiseMutPointerBackupStoreResponse *promise, SignalConstPointerTokioAsyncContext async_runtime, const SignalBackupKeyBytes *backup_key, SignalBorrowedBuffer previous_secret_data, SignalConstPointerConnectionManager connection_manager, const char *username, const char *password);
 
 SignalFfiError *signal_sender_certificate_clone(SignalMutPointerSenderCertificate *new_obj, SignalConstPointerSenderCertificate obj);
 

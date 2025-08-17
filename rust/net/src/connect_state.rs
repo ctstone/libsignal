@@ -16,14 +16,15 @@ use itertools::Itertools as _;
 use libsignal_net_infra::dns::DnsResolver;
 use libsignal_net_infra::errors::{LogSafeDisplay, TransportConnectError};
 use libsignal_net_infra::route::{
-    ComposedConnector, ConnectError, ConnectionOutcomeParams, ConnectionOutcomes, Connector,
-    ConnectorFactory, DelayBasedOnTransport, DescribeForLog, DescribedRouteConnector,
-    DirectOrProxy, HttpRouteFragment, InterfaceChangedOr, InterfaceMonitor, LoggingConnector,
-    ResettingConnectionOutcomes, ResolveHostnames, ResolveWithSavedDescription, ResolvedRoute,
-    RouteProvider, RouteProviderContext, RouteProviderExt as _, RouteResolver,
-    StaticTcpTimeoutConnector, ThrottlingConnector, TransportRoute, UnresolvedRouteDescription,
-    UnresolvedTransportRoute, UnresolvedWebsocketServiceRoute, UsePreconnect, UsesTransport,
-    VariableTlsTimeoutConnector, WebSocketRouteFragment, WebSocketServiceRoute,
+    ComposedConnector, ConnectError, ConnectionOutcomeParams, ConnectionOutcomes,
+    ConnectionProxyKind, Connector, ConnectorFactory, DelayBasedOnTransport, DescribeForLog,
+    DescribedRouteConnector, DirectOrProxy, HttpRouteFragment, InterfaceChangedOr,
+    InterfaceMonitor, LoggingConnector, ResettingConnectionOutcomes, ResolveHostnames,
+    ResolveWithSavedDescription, ResolvedRoute, RouteProvider, RouteProviderContext,
+    RouteProviderExt as _, RouteResolver, StaticTcpTimeoutConnector, ThrottlingConnector,
+    TransportRoute, UnresolvedRouteDescription, UnresolvedTransportRoute,
+    UnresolvedWebsocketServiceRoute, UsePreconnect, UsesTransport, VariableTlsTimeoutConnector,
+    WebSocketRouteFragment, WebSocketServiceRoute,
 };
 use libsignal_net_infra::tcp_ssl::{LONG_TCP_HANDSHAKE_THRESHOLD, LONG_TLS_HANDSHAKE_THRESHOLD};
 use libsignal_net_infra::timeouts::{
@@ -31,8 +32,8 @@ use libsignal_net_infra::timeouts::{
     ONE_ROUTE_CONNECTION_TIMEOUT, POST_ROUTE_CHANGE_CONNECTION_TIMEOUT,
 };
 use libsignal_net_infra::utils::NetworkChangeEvent;
-use libsignal_net_infra::ws::{WebSocketConnectError, WebSocketStreamLike};
-use libsignal_net_infra::ws2::attested::AttestedConnection;
+use libsignal_net_infra::ws::attested::AttestedConnection;
+use libsignal_net_infra::ws::WebSocketConnectError;
 use libsignal_net_infra::{AsHttpHeader as _, AsyncDuplexStream};
 use rand::distr::uniform::{UniformSampler, UniformUsize};
 use rand_core::{OsRng, UnwrapErr};
@@ -209,6 +210,14 @@ impl std::fmt::Display for RouteInfo {
 }
 
 impl RouteInfo {
+    pub fn proxy(&self) -> Option<ConnectionProxyKind> {
+        self.unresolved.proxy()
+    }
+
+    pub fn domain_front(&self) -> Option<&'static str> {
+        self.unresolved.domain_front()
+    }
+
     pub fn fake() -> Self {
         Self {
             unresolved: UnresolvedRouteDescription::fake(),
@@ -347,6 +356,7 @@ impl<TC> ConnectionResources<'_, TC> {
                         response,
                         received_at: _,
                     } => {
+                        log::trace!("[{log_tag}] full response: {response:?}");
                         // Retry-After takes precedence over everything else.
                         libsignal_net_infra::extract_retry_later(response.headers()).is_some() ||
                         // If we're rejected based on the request (4xx), there's no point in retrying.
@@ -407,29 +417,31 @@ impl<TC> ConnectionResources<'_, TC> {
         ))
     }
 
-    pub(crate) async fn connect_attested_ws<E, WC>(
+    pub(crate) async fn connect_attested_ws<E>(
         self,
         routes: impl RouteProvider<Route = UnresolvedWebsocketServiceRoute>,
-        auth: Auth,
-        (ws_config, ws_connector): (libsignal_net_infra::ws2::Config, WC),
+        auth: &Auth,
+        ws_config: libsignal_net_infra::ws::Config,
         log_tag: Arc<str>,
         params: &EndpointParams<'_, E>,
     ) -> Result<(AttestedConnection, RouteInfo), crate::enclave::Error>
     where
         TC: WebSocketTransportConnectorFactory,
-        WC: Connector<
-                (WebSocketRouteFragment, HttpRouteFragment),
-                TC::Connection,
-                Connection: WebSocketStreamLike + Send + 'static,
-                Error = WebSocketConnectError,
-            > + Send
-            + Sync,
         E: NewHandshake,
     {
         let ws_routes = routes.map_routes(|mut route| {
             route.fragment.headers.extend([auth.as_header()]);
             route
         });
+
+        // We don't want to race multiple websocket handshakes because when
+        // we take the first one, the others will be uncermoniously closed.
+        // That looks like unexpected behavior at the server end, and the
+        // wasted handshakes consume resources unnecessarily.  Instead,
+        // allow parallelism at the transport level but throttle the number
+        // of websocket handshakes that can complete.
+        let ws_connector =
+            ThrottlingConnector::new(crate::infra::ws::WithoutResponseHeaders::new(), 1);
 
         let (ws, route_info) = self
             .connect_ws(ws_routes, ws_connector, &log_tag)
@@ -440,10 +452,8 @@ impl<TC> ConnectionResources<'_, TC> {
                 )
                 | TimeoutOr::Timeout {
                     attempt_duration: _,
-                } => crate::enclave::Error::ConnectionTimedOut,
-                TimeoutOr::Other(ConnectError::FatalConnect(e)) => {
-                    crate::enclave::Error::WebSocketConnect(e)
-                }
+                } => crate::enclave::Error::AllConnectionAttemptsFailed,
+                TimeoutOr::Other(ConnectError::FatalConnect(e)) => e.into(),
             })?;
 
         let connection =
@@ -886,7 +896,7 @@ mod test {
 
         let fake_transport_connector = ConnectFn(move |(), route: TransportRoute| {
             std::future::ready(if *route.immediate_target() == bad_ip {
-                Err(WebSocketConnectError::Timeout)
+                Err(TransportConnectError::TcpConnectionFailed)
             } else {
                 Ok(())
             })

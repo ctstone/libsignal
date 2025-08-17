@@ -96,9 +96,9 @@ final class NetTests {
             #expect(message == "Protocol error: failed to parse the response from the server")
         }
         do {
-            try failWithError("ConnectDnsFailed")
+            try failWithError("TcpConnectFailed")
         } catch SignalError.ioError(let message) {
-            #expect(message == "IO error: DNS lookup failed")
+            #expect(message == "IO error: Failed to establish TCP connection to any of the IPs")
         }
         do {
             try failWithError("WebSocketIdleTooLong")
@@ -106,9 +106,9 @@ final class NetTests {
             #expect(message == "WebSocket error: channel was idle for too long")
         }
         do {
-            try failWithError("ConnectionTimedOut")
-        } catch SignalError.connectionTimeoutError(let message) {
-            #expect(message == "Connect timed out")
+            try failWithError("AllConnectionAttemptsFailed")
+        } catch SignalError.connectionFailed(let message) {
+            #expect(message == "No connection attempts succeeded before timeout")
         }
         do {
             try failWithError("ServerCrashed")

@@ -17,38 +17,7 @@ use tungstenite::protocol::CloseFrame;
 use tungstenite::Message;
 
 use crate::errors::LogSafeDisplay;
-use crate::ws::{TextOrBinary, WebSocketServiceError, WebSocketStreamLike};
-
-pub mod attested;
-
-/// Configuration values for managing the connected websocket.
-#[derive(Clone, Copy)]
-pub struct Config {
-    /// How long to wait after the last outgoing message before sending a
-    /// [`Message::Ping`].
-    ///
-    /// This time is measured across calls to [`Connection::handle_next_event`]
-    /// from the last time an outgoing frame was sent.
-    pub local_idle_timeout: Duration,
-
-    /// The amount of time to wait after the last message received from the
-    /// server before sending a [`Message::Ping`].
-    ///
-    /// This time is measured across calls to [`Connection::handle_next_event`],
-    /// from the most recent message received from the server.
-    pub remote_idle_ping_timeout: Duration,
-
-    /// The amount of time to wait after the last message received from the
-    /// server before disconnecting.
-    ///
-    /// This time is measured across calls to [`Connection::handle_next_event`],
-    /// from the most recent message received from the server.
-    ///
-    /// This should be longer than [`Self::remote_idle_ping_timeout`] to allow
-    /// the server time to respond to a sent ping before determining that the
-    /// connection is dead.
-    pub remote_idle_disconnect_timeout: Duration,
-}
+use crate::ws::{Config, TextOrBinary, WebSocketError, WebSocketStreamLike};
 
 /// An established websocket connection.
 ///
@@ -554,19 +523,19 @@ impl From<TungsteniteReceiveError> for TungsteniteError {
     }
 }
 
-impl From<TungsteniteSendError> for WebSocketServiceError {
+impl From<TungsteniteSendError> for WebSocketError {
     fn from(value: TungsteniteSendError) -> Self {
         TungsteniteError::from(value).into()
     }
 }
 
-impl From<TungsteniteReceiveError> for WebSocketServiceError {
+impl From<TungsteniteReceiveError> for WebSocketError {
     fn from(value: TungsteniteReceiveError) -> Self {
         TungsteniteError::from(value).into()
     }
 }
 
-impl From<TungsteniteError> for WebSocketServiceError {
+impl From<TungsteniteError> for WebSocketError {
     fn from(value: TungsteniteError) -> Self {
         match value {
             TungsteniteError::AlreadyClosed | TungsteniteError::ConnectionClosed => {

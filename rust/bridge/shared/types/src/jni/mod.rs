@@ -24,7 +24,8 @@ use libsignal_account_keys::Error as PinError;
 use libsignal_core::try_scoped;
 use libsignal_net::chat::{ConnectError as ChatConnectError, SendError as ChatSendError};
 use libsignal_net::infra::errors::RetryLater;
-use libsignal_net::infra::ws::WebSocketServiceError;
+use libsignal_net::infra::ws::WebSocketError;
+use libsignal_net::svrb::Error as SvrbError;
 use libsignal_net_chat::api::RateLimitChallenge;
 use libsignal_protocol::*;
 use signal_crypto::Error as SignalCryptoError;
@@ -77,6 +78,10 @@ pub type JavaMap<'a> = JObject<'a>;
 /// Return type marker for `bridge_fn`s that return Result, which gen_java_decl.py will pick out
 /// when generating Native.java.
 pub type Throwing<T> = T;
+
+/// Type marker for arguments that are nullable, which gen_java_decl.py will pick out when
+/// generating Native.kt.
+pub type Nullable<T> = T;
 
 /// A Java wrapper for a `CompletableFuture` type.
 #[derive(Default)]
@@ -309,7 +314,7 @@ impl JniError for SignalProtocolError {
     }
 }
 
-impl MessageOnlyExceptionJniError for ConnectTimedOut {
+impl MessageOnlyExceptionJniError for AllConnectionAttemptsFailed {
     fn exception_class(&self) -> ClassName<'static> {
         ClassName("org.signal.libsignal.net.NetworkException")
     }
@@ -770,10 +775,10 @@ impl JniError for CdsiError {
     }
 }
 
-impl MessageOnlyExceptionJniError for WebSocketServiceError {
+impl MessageOnlyExceptionJniError for WebSocketError {
     fn exception_class(&self) -> ClassName<'static> {
         match self {
-            WebSocketServiceError::Http(_) => {
+            WebSocketError::Http(_) => {
                 // In practice, all WebSocket HTTP errors come from multi-route connections, so any
                 // that make it to the point of bridging are considered to have resulted from a
                 // successful *connection* that then gets an error status code, and so we use
@@ -832,6 +837,53 @@ impl MessageOnlyExceptionJniError for ChatSendError {
             | ChatSendError::RequestTimedOut => {
                 ClassName("org.signal.libsignal.net.ChatServiceException")
             }
+        }
+    }
+}
+
+impl JniError for SvrbError {
+    fn to_throwable<'a>(&self, env: &mut JNIEnv<'a>) -> Result<JThrowable<'a>, BridgeLayerError> {
+        match self {
+            SvrbError::RestoreFailed(tries_remaining) => {
+                let message = env
+                    .new_string(self.to_string())
+                    .check_exceptions(env, "SvrbError::to_throwable")?;
+                let tries_remaining_int: i32 = (*tries_remaining).try_into().map_err(|_| {
+                    BridgeLayerError::IntegerOverflow("tries_remaining too large".to_owned())
+                })?;
+                new_instance(
+                    env,
+                    ClassName("org.signal.libsignal.svr.RestoreFailedException"),
+                    jni_args!((message => java.lang.String, tries_remaining_int => int) -> void),
+                )
+                .map(Into::into)
+            }
+            SvrbError::DataMissing => make_single_message_throwable(
+                env,
+                &self.to_string(),
+                ClassName("org.signal.libsignal.svr.DataMissingException"),
+            ),
+            SvrbError::AttestationError(inner) => inner.to_throwable(env),
+            SvrbError::Protocol(_) => make_single_message_throwable(
+                env,
+                &self.to_string(),
+                ClassName("org.signal.libsignal.net.NetworkProtocolException"),
+            ),
+            SvrbError::Connect(_)
+            | SvrbError::Service(_)
+            | SvrbError::AllConnectionAttemptsFailed => make_single_message_throwable(
+                env,
+                &self.to_string(),
+                ClassName("org.signal.libsignal.net.NetworkException"),
+            ),
+            SvrbError::RateLimited(inner) => inner.to_throwable(env),
+            SvrbError::PreviousBackupDataInvalid
+            | SvrbError::MetadataInvalid
+            | SvrbError::DecryptionError(_) => make_single_message_throwable(
+                env,
+                &self.to_string(),
+                ClassName("org.signal.libsignal.svr.InvalidSvrBDataException"),
+            ),
         }
     }
 }

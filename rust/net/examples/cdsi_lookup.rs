@@ -24,7 +24,7 @@ async fn cdsi_lookup(
 ) -> Result<LookupResponse, LookupError> {
     let (_token, remaining_response) = libsignal_net::infra::utils::timeout(
         timeout,
-        LookupError::ConnectionTimedOut,
+        LookupError::AllConnectionAttemptsFailed,
         cdsi.send_request(request),
     )
     .await?;
@@ -48,12 +48,6 @@ struct CliArgs {
     #[arg(long, default_value_t = Environment::Prod)]
     environment: Environment,
 }
-
-const WS2_CONFIG: libsignal_net_infra::ws2::Config = libsignal_net_infra::ws2::Config {
-    local_idle_timeout: Duration::from_secs(10),
-    remote_idle_ping_timeout: Duration::from_secs(10),
-    remote_idle_disconnect_timeout: Duration::from_secs(30),
-};
 
 #[tokio::main]
 async fn main() {
@@ -106,9 +100,9 @@ async fn main() {
                 cdsi_env.enclave_websocket_provider(EnableDomainFronting::No),
                 None,
             ),
-            WS2_CONFIG,
+            cdsi_env.ws_config,
             &cdsi_env.params,
-            auth,
+            &auth,
         )
         .await
     }

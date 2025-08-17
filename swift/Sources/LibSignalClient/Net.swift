@@ -150,6 +150,21 @@ public class Net {
         }
     }
 
+    /// Get the SVR-B (Secure Value Recovery for Backups) service for this network instance.
+    ///
+    /// SVR-B provides forward secrecy for Signal backups, ensuring that even if the user's
+    /// Account Entropy Pool or Backup Key is compromised, the attacker can gain access to
+    /// only the user's most recent backup. This is achieved by storing the forward secrecy
+    /// token in a secure enclave inside the SVR-B server, which provably attests that it
+    /// only stores a single token at a time for each user.
+    ///
+    /// - Parameter auth: The authentication credentials to use when connecting to the SVR-B server.
+    /// - Returns: An SvrB service instance configured for this network environment
+    /// - SeeAlso: ``SvrB``
+    public func svrB(auth: Auth) -> SvrB {
+        return SvrB(net: self, auth: auth)
+    }
+
     /// Like ``cdsiLookup(auth:request:)`` but with the parameters to ``CdsiLookupRequest`` broken out.
     public func cdsiLookup(
         auth: Auth,
@@ -338,15 +353,20 @@ public struct Auth: Sendable {
     }
 }
 
+// This test endpoint isn't generated in device builds, to save on code size.
+#if !os(iOS) || targetEnvironment(simulator)
+
 extension Auth {
     // To be used by the tests
     internal init(username: String, enclaveSecret: String) throws {
         let otp = try invokeFnReturningString {
-            signal_create_otp_from_base64($0, username, enclaveSecret)
+            signal_testing_create_otp_from_base64($0, username, enclaveSecret)
         }
         self.init(username: username, password: otp)
     }
 }
+
+#endif
 
 internal class ConnectionManager: NativeHandleOwner<SignalMutPointerConnectionManager> {
     private class ProxyConfig: NativeHandleOwner<SignalMutPointerConnectionProxyConfig> {
