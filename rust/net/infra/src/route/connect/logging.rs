@@ -38,8 +38,8 @@ impl<I> LoggingConnector<I> {
 
 impl<I, R, Inner> Connector<R, Inner> for LoggingConnector<I>
 where
-    I: Connector<R, Inner, Connection: Send, Error: Send + LogSafeDisplay> + Sync,
-    R: Send,
+    I: Connector<R, Inner, Connection: Send, Error: Send + LogSafeDisplay + std::fmt::Debug> + Sync,
+    R: Send + std::fmt::Debug,
     Inner: Send,
 {
     type Connection = I::Connection;
@@ -57,6 +57,9 @@ where
             label,
         } = self;
 
+        // Log the route information before attempting connection
+        log::debug!("[{log_tag}] {label} attempting connection to route: {route:?}");
+        
         let start = tokio::time::Instant::now();
         let threshold = *slow_connection_threshold;
 
@@ -83,15 +86,18 @@ where
                 }
             }
             Err(e) => {
+                // Capture backtrace for detailed debugging
+                let backtrace = std::backtrace::Backtrace::capture();
+                
                 if elapsed > threshold {
                     log::warn!(
-                        "[{log_tag}] {label} failed after {elapsed:.3?} (exceeded threshold of {threshold:?}): {}",
-                        e as &dyn LogSafeDisplay
+                        "[{log_tag}] {label} failed after {elapsed:.3?} (exceeded threshold of {threshold:?}): {:#?}\nBacktrace:\n{backtrace}",
+                        e
                     );
                 } else {
                     log::info!(
-                        "[{log_tag}] {label} failed after {elapsed:.3?}: {}",
-                        e as &dyn LogSafeDisplay
+                        "[{log_tag}] {label} failed after {elapsed:.3?}: {:#?}\nBacktrace:\n{backtrace}",
+                        e
                     );
                 }
             }

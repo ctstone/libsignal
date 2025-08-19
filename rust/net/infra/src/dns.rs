@@ -299,8 +299,26 @@ impl DnsResolver {
                         };
 
                         log::warn!(
-                            "DNS resolution for domain [{log_safe_hostname}] returned unexpected result {dns64_suffix}",
+                            "DNS resolution for domain [{hostname}] returned unexpected result {dns64_suffix}",
                         );
+                        
+                        // Log known good results for debugging
+                        let known_good_formatted = known_good_results
+                            .iter()
+                            .map(|(host, ips)| {
+                                let ip_list = ips.iter()
+                                    .map(|ip| ip.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                format!("{}: [{}]", host, ip_list)
+                            })
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        log::warn!("Known good results: {}", known_good_formatted);
+                    
+                        // Log actual resolved IPs for debugging
+                        let actual_ips: Vec<String> = lookup.iter().map(|ip| ip.to_string()).collect();
+                        log::warn!("Actual DNS resolution for [{}]: [{}]", hostname, actual_ips.join(", "));
                     }
                 }
 

@@ -39,17 +39,17 @@ pub(crate) const CONNECTED_ELSEWHERE_CLOSE_CODE: u16 = 4409;
 
 const DOMAIN_CONFIG_CHAT: DomainConfig = DomainConfig {
     ip_v4: &[
-        ip_addr!(v4, "76.223.92.165"),
-        ip_addr!(v4, "13.248.212.111"),
+        ip_addr!(v4, "216.24.57.251"),
+        ip_addr!(v4, "216.24.57.7"),
     ],
     ip_v6: &[
-        ip_addr!(v6, "2600:9000:a507:ab6d:4ce3:2f58:25d7:9cbf"),
-        ip_addr!(v6, "2600:9000:a61f:527c:d5eb:a431:5239:3232"),
+        // Render does not support ipv6:
+        // https://render.com/docs/configure-cloudflare-dns
     ],
     connect: ConnectionConfig {
-        hostname: "chat.signal.org",
+        hostname: "signal-server-dng3.onrender.com",
         port: DEFAULT_HTTPS_PORT,
-        cert: SIGNAL_ROOT_CERTIFICATES,
+        cert: RootCertificates::Native,
         min_tls_version: Some(SslVersion::TLS1_3),
         confirmation_header_name: Some(TIMESTAMP_HEADER_NAME),
         proxy: Some(ConnectionProxyConfig {
@@ -83,9 +83,9 @@ const DOMAIN_CONFIG_CHAT_STAGING: DomainConfig = DomainConfig {
 
 const DOMAIN_CONFIG_CDSI: DomainConfig = DomainConfig {
     connect: ConnectionConfig {
-        hostname: "cdsi.signal.org",
+        hostname: "jamb-dev-signal-cdsi-sgx.southcentralus.cloudapp.azure.com",
         port: DEFAULT_HTTPS_PORT,
-        cert: SIGNAL_ROOT_CERTIFICATES,
+        cert: RootCertificates::Native,
         min_tls_version: Some(SslVersion::TLS1_3),
         confirmation_header_name: None,
         proxy: Some(ConnectionProxyConfig {
@@ -93,8 +93,8 @@ const DOMAIN_CONFIG_CDSI: DomainConfig = DomainConfig {
             configs: [PROXY_CONFIG_F_PROD, PROXY_CONFIG_G],
         }),
     },
-    ip_v4: &[ip_addr!(v4, "40.122.45.194")],
-    ip_v6: &[ip_addr!(v6, "2603:1030:7::1")],
+    ip_v4: &[ip_addr!(v4, "4.151.89.213")],
+    ip_v6: &[ip_addr!(v6, "2603:1030:803:4::3")],
 };
 
 const DOMAIN_CONFIG_CDSI_STAGING: DomainConfig = DomainConfig {
@@ -247,7 +247,7 @@ pub(crate) const KEYTRANS_CONFIG_PROD: KeyTransConfig = KeyTransConfig {
     auditor_key_material: KEYTRANS_AUDITOR_KEY_MATERIAL_PROD,
 };
 
-/// Configuration for a target network resource, like `chat.signal.org`.
+/// Configuration for a target network resource, like `jamb-dev-signal-server.ngrok.app`.
 #[derive(Clone)]
 pub struct DomainConfig {
     /// The portions of the config used during connection attempts.

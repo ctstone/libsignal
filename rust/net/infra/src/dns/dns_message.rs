@@ -280,7 +280,7 @@ mod test {
     use crate::dns::dns_types::ResourceType;
 
     const REQUEST_ID: u16 = 0xABCD;
-    const VALID_DOMAIN: &str = "chat.signal.org";
+    const VALID_DOMAIN: &str = "jamb-dev-signal-server.ngrok.app";
 
     #[test]
     fn valid_requests_identical() {
@@ -337,7 +337,7 @@ mod test {
 
     #[test]
     fn invalid_name_empty_label() {
-        for name in ["", ".", "chat..signal.org", ".chat.signal.org"] {
+        for name in ["", ".", "chat..signal.org", ".jamb-dev-signal-server.ngrok.app"] {
             assert_matches!(
                 create_request_with_id(REQUEST_ID, name, ResourceType::A),
                 Err(Error::ProtocolErrorLabelEmpty)
