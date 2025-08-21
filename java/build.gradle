@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id "base"
     id "signing"
-    id "com.diffplug.spotless" version "6.20.0"
+    id "com.diffplug.spotless" version "7.2.1"
     id "io.github.gradle-nexus.publish-plugin" version "2.0.0"
 
     id "org.jetbrains.kotlin.jvm" version "2.1.0" apply false
@@ -15,55 +15,33 @@ plugins {
     id 'org.jetbrains.kotlin.android' version "2.1.0" apply false
 }
 
+repositories {
+    mavenCentral()
+    google()
+    mavenLocal()
+}
+
 allprojects {
-    version = "0.76.7"
+    version = "0.78.3"
     group   = "org.signal"
 
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+        options.compilerArgs += ["-Xlint:deprecation", "-Xlint:fallthrough", "-Xlint:unchecked"]
+    }
+    tasks.withType(Javadoc) {
+        options.encoding = 'UTF-8'
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
     tasks.withType(KotlinCompile).configureEach {
         compilerOptions.jvmTarget = JvmTarget.JVM_17
     }
-}
-
-subprojects {
-    if (JavaVersion.current().isJava8Compatible()) {
-        allprojects {
-            tasks.withType(Javadoc) {
-                options.encoding = 'UTF-8'
-                options.addStringOption('Xdoclint:none', '-quiet')
-            }
-        }
+    tasks.withType(AbstractArchiveTask) {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
     }
 
-    allprojects {
-        tasks.withType(JavaCompile) {
-            options.encoding = 'UTF-8'
-            options.compilerArgs += ["-Xlint:deprecation", "-Xlint:fallthrough", "-Xlint:unchecked"]
-        }
-        tasks.withType(AbstractArchiveTask) {
-            preserveFileTimestamps = false
-            reproducibleFileOrder = true
-        }
-    }
-
-    apply plugin: "com.diffplug.spotless"
     apply plugin: "org.jetbrains.dokka"
-    spotless {
-        kotlin {
-            target('**/*.kt')
-            targetExclude("**/acknowledgments/**")
-            ktlint()
-        }
-        java {
-            target('**/*.java')
-            targetExclude('**/Native.java', '**/NativeTesting.java')
-            importOrder()
-            removeUnusedImports()
-
-            googleJavaFormat()
-            formatAnnotations()
-            licenseHeaderFile rootProject.file('license_header.txt')
-        }
-    }
 }
 
 task makeJniLibrariesDesktop(type:Exec) {
@@ -141,4 +119,33 @@ nexusPublishing {
 
 def isReleaseBuild() {
     return version.contains("SNAPSHOT") == false
+}
+
+// Late evaluation after this point.
+
+evaluationDependsOnChildren()
+
+spotless {
+    kotlin {
+        target allprojects.collectMany {
+            return it.tasks.withType(KotlinCompile)
+        }.inject(files()) { collected, next ->
+            collected + next.sources
+        }
+        targetExclude('**/Native.kt', '**/NativeTesting.kt')
+        ktlint()
+    }
+    java {
+        target allprojects.collectMany {
+            return it.tasks.withType(JavaCompile)
+        }.inject(files()) { collected, next ->
+            collected + next.source
+        }
+        importOrder()
+        removeUnusedImports()
+
+        googleJavaFormat()
+        formatAnnotations()
+        licenseHeaderFile rootProject.file('license_header.txt')
+    }
 }

@@ -271,6 +271,50 @@ impl DefaultSignalNodeError for attest::enclave::Error {}
 
 impl DefaultSignalNodeError for signal_crypto::Error {}
 
+impl SignalNodeError for libsignal_net::svrb::Error {
+    fn into_throwable<'a, C: Context<'a>>(
+        self,
+        cx: &mut C,
+        module: Handle<'a, JsObject>,
+        operation_name: &str,
+    ) -> Handle<'a, JsError> {
+        let (name, make_props) = match &self {
+            Self::Service(_) | Self::AllConnectionAttemptsFailed | Self::Connect(_) => {
+                (Some(IO_ERROR), None)
+            }
+            Self::RateLimited(inner) => return inner.into_throwable(cx, module, operation_name),
+            Self::AttestationError(_) => (Some("SvrAttestationError"), None),
+            Self::RestoreFailed(tries_remaining) => (
+                Some("SvrRestoreFailed"),
+                Some(move |cx: &mut C| {
+                    let props = cx.empty_object();
+                    let tries_remaining = tries_remaining.convert_into(cx)?;
+                    props.set(cx, "triesRemaining", tries_remaining)?;
+                    Ok(props.upcast())
+                }),
+            ),
+            Self::DataMissing => (Some("SvrDataMissing"), None),
+            Self::Protocol(_) => (Some("IoError"), None),
+            Self::PreviousBackupDataInvalid => (Some("SvrInvalidData"), None),
+            Self::MetadataInvalid => (Some("SvrInvalidData"), None),
+            Self::DecryptionError(_) => (Some("SvrInvalidData"), None),
+        };
+
+        let message = self.to_string();
+        match make_props {
+            Some(f) => new_js_error(cx, module, name, &message, operation_name, f),
+            None => new_js_error(
+                cx,
+                module,
+                name,
+                &message,
+                operation_name,
+                no_extra_properties,
+            ),
+        }
+    }
+}
+
 impl DefaultSignalNodeError for zkgroup::ZkGroupVerificationFailure {}
 
 impl DefaultSignalNodeError for zkgroup::ZkGroupDeserializationFailure {}
@@ -581,7 +625,7 @@ impl SignalNodeError for libsignal_net::cdsi::LookupError {
             Self::AttestationError(e) => return e.into_throwable(cx, module, operation_name),
             Self::InvalidArgument { server_reason: _ } => None,
             Self::InvalidToken => Some("CdsiInvalidToken"),
-            Self::ConnectionTimedOut
+            Self::AllConnectionAttemptsFailed
             | Self::ConnectTransport(_)
             | Self::WebSocket(_)
             | Self::CdsiProtocol(_)

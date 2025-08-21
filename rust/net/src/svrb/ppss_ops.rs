@@ -2,17 +2,17 @@
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 //
+
 //! High level data operations on instances of `PpssSetup`
 //!
 //! These functions are useful if we ever want to perform multiple operations
 //! on the same set of open connections, as opposed to having to connect for
 //! each individual operation, as implied by `SvrBClient` trait.
-use std::collections::VecDeque;
 
 use futures_util::future::join_all;
 use futures_util::TryFutureExt as _;
+use libsignal_net_infra::ws::attested::AttestedConnectionError;
 use libsignal_net_infra::ws::NextOrClose;
-use libsignal_net_infra::ws2::attested::AttestedConnectionError;
 pub(crate) use libsignal_svrb::{Backup4, Secret};
 use libsignal_svrb::{Query4, Remove4, Restore1};
 use rand::rngs::OsRng;
@@ -110,9 +110,14 @@ pub async fn do_remove(connect_results: impl IntoConnectionResults) -> Result<()
         mut connections,
         errors,
     } = ConnectionContext::new(connect_results);
+    if connections.is_empty() {
+        return Err(errors.into_iter().next().expect("at least one connection"));
+    }
+
     for err in errors {
         // For the remove operation we ignore connection failures
-        // and proceed to work with the successful connections.
+        // and proceed to work with the successful connections,
+        // as long as there are any.
         log::debug!("Connection failure '{:?}' will be ignored.", &err);
     }
 
@@ -153,26 +158,26 @@ async fn run_attested_interaction(
     connection: &mut LabeledConnection,
     request: impl AsRef<[u8]>,
 ) -> Result<(NextOrClose<Vec<u8>>, &ConnectionLabel), AttestedConnectionError> {
-    libsignal_net_infra::ws2::attested::run_attested_interaction(&mut connection.0, request)
+    libsignal_net_infra::ws::attested::run_attested_interaction(&mut connection.0, request)
         .map_ok(|n| (n, &connection.1))
         .await
 }
 
 struct ConnectionContext {
     connections: Vec<LabeledConnection>,
-    errors: VecDeque<Error>,
+    errors: Vec<Error>,
 }
 
 impl ConnectionContext {
     fn new<Arr: IntoConnectionResults>(connect_results: Arr) -> Self {
         let mut connections = Vec::with_capacity(Arr::ConnectionResults::N);
-        let mut errors = VecDeque::with_capacity(Arr::ConnectionResults::N);
+        let mut errors = Vec::with_capacity(Arr::ConnectionResults::N);
         for connect_result in connect_results.into_connection_results().into_iter() {
             match connect_result {
                 Ok((connection, remote_address)) => {
                     connections.push((connection, remote_address));
                 }
-                Err(err) => errors.push_back(err.into()),
+                Err(err) => errors.push(err.into()),
             }
         }
         Self {
@@ -219,7 +224,7 @@ mod test {
 
         fn into_connection_results(self) -> Self::ConnectionResults {
             [
-                Err(Error::ConnectionTimedOut),
+                Err(Error::AllConnectionAttemptsFailed),
                 Err(Error::AttestationError(
                     attest::enclave::Error::InvalidBridgeStateError,
                 )),
@@ -231,25 +236,24 @@ mod test {
     async fn do_backup_fails_with_the_first_error() {
         let backup = do_prepare::<TestEnv>(b"");
         let result = do_backup::<TestEnv>(NotConnectedResults, &backup).await;
-        assert_matches!(result, Err(crate::svrb::Error::ConnectionTimedOut));
+        assert_matches!(result, Err(crate::svrb::Error::AllConnectionAttemptsFailed));
     }
 
     #[tokio::test]
     async fn do_restore_fails_with_the_first_error() {
         let result = do_restore::<TestEnv>(NotConnectedResults, b"").await;
-        assert_matches!(result, Err(crate::svrb::Error::ConnectionTimedOut));
+        assert_matches!(result, Err(crate::svrb::Error::AllConnectionAttemptsFailed));
     }
 
     #[tokio::test]
     async fn do_query_fails_with_the_first_error() {
         let result = do_query(NotConnectedResults).await;
-        assert_matches!(result, Err(crate::svrb::Error::ConnectionTimedOut));
+        assert_matches!(result, Err(crate::svrb::Error::AllConnectionAttemptsFailed));
     }
 
     #[tokio::test]
-    async fn do_remove_does_not_fail_on_bad_connections() {
-        do_remove(NotConnectedResults)
-            .await
-            .expect("Should ignore connection errors");
+    async fn do_remove_fails_if_all_connections_failed() {
+        let result = do_remove(NotConnectedResults).await;
+        assert_matches!(result, Err(crate::svrb::Error::AllConnectionAttemptsFailed));
     }
 }

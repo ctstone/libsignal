@@ -11,12 +11,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::CloseFrame;
 
-use crate::ws::error::{ProtocolError, SpaceError, UnexpectedCloseError};
-use crate::ws::{NextOrClose, TextOrBinary, WebSocketServiceError, WebSocketStreamLike};
-use crate::ws2::{
+use crate::ws::connection::{
     FinishReason, MessageEvent, NextEventError, Outcome, TungsteniteReceiveError,
     TungsteniteSendError,
 };
+use crate::ws::error::{ProtocolError, SpaceError, UnexpectedCloseError};
+use crate::ws::{NextOrClose, TextOrBinary, WebSocketError, WebSocketStreamLike};
 
 /// Encrypted connection to an attested host.
 #[derive(Debug)]
@@ -39,7 +39,7 @@ pub enum AttestedProtocolError {
 pub enum AttestedConnectionError {
     Protocol(AttestedProtocolError),
     Attestation(attest::enclave::Error),
-    WebSocket(WebSocketServiceError),
+    WebSocket(WebSocketError),
 }
 
 impl From<attest::client_connection::Error> for AttestedConnectionError {
@@ -68,7 +68,7 @@ impl AttestedConnection {
     /// connection.
     pub async fn connect<WS>(
         ws: WS,
-        ws_config: crate::ws2::Config,
+        ws_config: crate::ws::Config,
         log_tag: Arc<str>,
         new_handshake: impl FnOnce(&[u8]) -> attest::enclave::Result<attest::enclave::Handshake>,
     ) -> Result<Self, AttestedConnectionError>
@@ -162,7 +162,7 @@ struct WsClient {
 }
 
 impl WsClient {
-    fn new<WS>(ws: WS, ws_config: crate::ws2::Config, log_tag: Arc<str>) -> Self
+    fn new<WS>(ws: WS, ws_config: crate::ws::Config, log_tag: Arc<str>) -> Self
     where
         WS: WebSocketStreamLike + Send + 'static,
     {
@@ -219,7 +219,7 @@ pub enum SendError {
 #[derive(Debug)]
 pub enum ReceiveError {
     WebSocketSend(TungsteniteSendError),
-    WebSocketReceive(crate::ws2::TungsteniteReceiveError),
+    WebSocketReceive(crate::ws::connection::TungsteniteReceiveError),
     ServerIdleTooLong(std::time::Duration),
     UnexpectedConnectionClose,
     UnexpectedTextMessage,
@@ -247,10 +247,10 @@ async fn spawned_task_body(
     stream: impl WebSocketStreamLike,
     outgoing_rx: mpsc::Receiver<(TextOrBinary, oneshot::Sender<Result<(), SendError>>)>,
     incoming_tx: mpsc::Sender<Result<NextOrClose<TextOrBinary>, ReceiveError>>,
-    config: crate::ws2::Config,
+    config: crate::ws::Config,
     log_tag: Arc<str>,
 ) -> Result<(), TaskExitError> {
-    let connection = crate::ws2::Connection::new(
+    let connection = crate::ws::Connection::new(
         stream,
         ReceiverStream::new(outgoing_rx),
         config,
@@ -447,7 +447,7 @@ impl From<ReceiveError> for AttestedConnectionError {
                 AttestedConnectionError::WebSocket(tungstenite_receive_error.into())
             }
             ReceiveError::ServerIdleTooLong(_duration) => {
-                AttestedConnectionError::WebSocket(WebSocketServiceError::ChannelIdleTooLong)
+                AttestedConnectionError::WebSocket(WebSocketError::ChannelIdleTooLong)
             }
             ReceiveError::UnexpectedConnectionClose => AttestedConnectionError::Protocol(
                 AttestedProtocolError::UnexpectedClose(UnexpectedCloseError::from(None)),
@@ -466,16 +466,14 @@ impl From<SendError> for AttestedConnectionError {
                 AttestedProtocolError::UnexpectedClose(UnexpectedCloseError::from(None)),
             ),
             SendError::WebSocketProtocol(protocol_error) => {
-                AttestedConnectionError::WebSocket(WebSocketServiceError::Protocol(protocol_error))
+                AttestedConnectionError::WebSocket(WebSocketError::Protocol(protocol_error))
             }
-            SendError::Io(error) => {
-                AttestedConnectionError::WebSocket(WebSocketServiceError::Io(error))
-            }
-            SendError::MessageTooLarge { size, max_size } => AttestedConnectionError::WebSocket(
-                WebSocketServiceError::Capacity(SpaceError::Capacity(
+            SendError::Io(error) => AttestedConnectionError::WebSocket(WebSocketError::Io(error)),
+            SendError::MessageTooLarge { size, max_size } => {
+                AttestedConnectionError::WebSocket(WebSocketError::Capacity(SpaceError::Capacity(
                     tungstenite::error::CapacityError::MessageTooLong { size, max_size },
-                )),
-            ),
+                )))
+            }
         }
     }
 }
@@ -610,10 +608,10 @@ mod test {
     use tokio_tungstenite::WebSocketStream;
 
     use super::*;
-    use crate::ws::testutil::fake_websocket;
-    use crate::ws2::attested::testutil::{
+    use crate::ws::attested::testutil::{
         run_attested_server, AttestedServerOutput, FAKE_ATTESTATION,
     };
+    use crate::ws::testutil::fake_websocket;
     use crate::AsyncDuplexStream;
 
     const ECHO_BYTES: &[u8] = b"two nibbles to a byte";
@@ -646,7 +644,7 @@ mod test {
         .await
     }
 
-    const FAKE_WS_CONFIG: crate::ws2::Config = crate::ws2::Config {
+    const FAKE_WS_CONFIG: crate::ws::Config = crate::ws::Config {
         local_idle_timeout: Duration::from_secs(10),
         remote_idle_ping_timeout: Duration::from_secs(10),
         remote_idle_disconnect_timeout: Duration::from_secs(20),

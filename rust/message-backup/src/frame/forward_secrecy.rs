@@ -6,15 +6,20 @@
 use std::io;
 
 use futures::AsyncRead;
-use libsignal_account_keys::proto::backup_metadata::metadata_pb::Pair as ForwardSecrecyPair;
-use libsignal_account_keys::proto::backup_metadata::MetadataPb;
+use libsignal_account_keys::BACKUP_FORWARD_SECRECY_TOKEN_LEN;
+use libsignal_svrb::proto::backup_metadata::metadata_pb::Pair as ForwardSecrecyPair;
+use libsignal_svrb::proto::backup_metadata::MetadataPb;
 use protobuf::Message;
+use sha2::Digest;
 
 use crate::frame::{FramesReader, ValidationError};
 use crate::log_unknown_fields;
 use crate::parse::VarintDelimitedReader;
 
 pub const MAGIC_NUMBER: &[u8] = b"SBACKUP\x01";
+// From HMAC_SHA256_TRUNCATED_BYTES in net's svrb.rs.
+const CT_MAC_LEN: usize = 16;
+const BACKUP_METADATA_IV_LEN: usize = 12;
 
 impl<R: AsyncRead + Unpin> FramesReader<R> {
     pub async fn verify_metadata(reader: &mut R) -> Result<(), ValidationError> {
@@ -25,6 +30,7 @@ impl<R: AsyncRead + Unpin> FramesReader<R> {
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
 
         let MetadataPb {
+            iv,
             pair: forward_secrecy_pairs,
             special_fields,
         } = MetadataPb::parse_from_bytes(&metadata)
@@ -54,14 +60,39 @@ impl<R: AsyncRead + Unpin> FramesReader<R> {
             if ct.is_empty() {
                 return Err(ValidationError::MissingMetadataField("pair.ct"));
             }
+            if ct.len() != BACKUP_FORWARD_SECRECY_TOKEN_LEN + CT_MAC_LEN {
+                return Err(ValidationError::InvalidLength {
+                    field: "pair.ct",
+                    expected: BACKUP_FORWARD_SECRECY_TOKEN_LEN + CT_MAC_LEN,
+                    actual: ct.len(),
+                });
+            }
             if pw_salt.is_empty() {
                 return Err(ValidationError::MissingMetadataField("pair.pw_salt"));
+            }
+            // Strictly, the salt for an HKDF operation doesn't have any fixed size; however, salts
+            // longer than the hash output size are hashed down ahead of time, so the effective
+            // maximum size for a salt is the hash output size.
+            if pw_salt.len() != sha2::Sha256::output_size() {
+                return Err(ValidationError::InvalidLength {
+                    field: "pair.pw_salt",
+                    expected: sha2::Sha256::output_size(),
+                    actual: pw_salt.len(),
+                });
             }
 
             // We don't actually validate the salts and ciphertexts; we don't have the keys to do so. We
             // could make them accessible, but that would complicate all the APIs around backup
             // generation as well, having to expose the details of blobs that would otherwise be opaque
             // at higher levels.
+        }
+
+        if iv.len() != BACKUP_METADATA_IV_LEN {
+            return Err(ValidationError::InvalidLength {
+                field: "iv",
+                expected: BACKUP_METADATA_IV_LEN,
+                actual: iv.len(),
+            });
         }
 
         // Verify that no bytes are left in the VarintDelimitedReader's buffer.
@@ -92,6 +123,7 @@ pub(crate) mod test {
 
     pub(crate) fn test_metadata() -> MetadataPb {
         MetadataPb {
+            iv: vec![0u8; 12],
             pair: vec![
                 ForwardSecrecyPair {
                     ct: vec![1; 48],

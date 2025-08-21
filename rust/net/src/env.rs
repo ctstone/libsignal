@@ -21,8 +21,8 @@ use libsignal_net_infra::route::{
     HttpsProvider, TlsRouteProvider,
 };
 use libsignal_net_infra::{
-    AsStaticHttpHeader, ConnectionParams, EnableDomainFronting, EnforceMinimumTls, RouteType,
-    TransportConnectionParams,
+    ws, AsStaticHttpHeader, ConnectionParams, EnableDomainFronting, EnforceMinimumTls, RouteType,
+    TransportConnectionParams, RECOMMENDED_WS_CONFIG,
 };
 use nonzero_ext::nonzero;
 use rand::seq::SliceRandom;
@@ -78,6 +78,24 @@ const DOMAIN_CONFIG_CHAT_STAGING: DomainConfig = DomainConfig {
             path_prefix: "/service-staging",
             configs: [PROXY_CONFIG_F_STAGING, PROXY_CONFIG_G],
         }),
+    },
+};
+
+const DOMAIN_CONFIG_CHAT_NOISE_STAGING: NoiseDomainConfig = NoiseDomainConfig {
+    ip_v4: &[
+        ip_addr!(v4, "166.117.73.74"),
+        ip_addr!(v4, "166.117.238.163"),
+    ],
+    ip_v6: &[
+        ip_addr!(v6, "2600:9000:a61f:527c:52e7:dca0:a539:345e"),
+        ip_addr!(v6, "2600:9000:a507:ab6d:bd21:581c:edad:2f5f"),
+    ],
+    connect: NoiseConnectionConfig {
+        hostname: "noise-direct.chat.staging.signal.org",
+        port: DEFAULT_HTTPS_PORT,
+        server_public_key: &hex!(
+            "143f97ca37cfa4e7fb427520715514c683e22e8c519a188b3f5133a8fcd25619"
+        ),
     },
 };
 
@@ -161,6 +179,22 @@ const DOMAIN_CONFIG_SVRB_STAGING: DomainConfig = DomainConfig {
     ip_v6: &[],
 };
 
+const DOMAIN_CONFIG_SVRB_PROD: DomainConfig = DomainConfig {
+    connect: ConnectionConfig {
+        hostname: "svrb.signal.org",
+        port: DEFAULT_HTTPS_PORT,
+        cert: SIGNAL_ROOT_CERTIFICATES,
+        min_tls_version: Some(SslVersion::TLS1_3),
+        confirmation_header_name: None,
+        proxy: Some(ConnectionProxyConfig {
+            path_prefix: "/svrb",
+            configs: [PROXY_CONFIG_F_STAGING, PROXY_CONFIG_G],
+        }),
+    },
+    ip_v4: &[ip_addr!(v4, "20.114.45.6")],
+    ip_v6: &[],
+};
+
 pub const PROXY_CONFIG_F_PROD: ProxyConfig = ProxyConfig {
     route_type: RouteType::ProxyF,
     http_host: "reflector-signal.global.ssl.fastly.net",
@@ -209,6 +243,11 @@ pub(crate) const ENDPOINT_PARAMS_SVR2_STAGING: EndpointParams<'static, SvrSgx> =
 pub(crate) const ENDPOINT_PARAMS_SVRB_STAGING: EndpointParams<'static, SvrSgx> = EndpointParams {
     mr_enclave: MrEnclave::new(attest::constants::ENCLAVE_ID_SVRB_STAGING),
     raft_config: attest::constants::RAFT_CONFIG_SVRB_STAGING,
+};
+
+pub(crate) const ENDPOINT_PARAMS_SVRB_PROD: EndpointParams<'static, SvrSgx> = EndpointParams {
+    mr_enclave: MrEnclave::new(attest::constants::ENCLAVE_ID_SVRB_PROD),
+    raft_config: attest::constants::RAFT_CONFIG_SVRB_PROD,
 };
 
 pub(crate) const ENDPOINT_PARAMS_CDSI_PROD: EndpointParams<'static, Cdsi> = EndpointParams {
@@ -296,6 +335,15 @@ pub struct KeyTransConfig {
 }
 
 impl DomainConfig {
+    pub fn static_fallback(&self) -> (&'static str, LookupResult) {
+        (
+            self.connect.hostname,
+            LookupResult::new(self.ip_v4.into(), self.ip_v6.into()),
+        )
+    }
+}
+
+impl NoiseDomainConfig {
     pub fn static_fallback(&self) -> (&'static str, LookupResult) {
         (
             self.connect.hostname,
@@ -428,6 +476,7 @@ impl ConnectionConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct UserAgent(HeaderValue);
 
 impl UserAgent {
@@ -523,25 +572,71 @@ impl From<KeyTransConfig> for PublicConfig {
     }
 }
 
-pub struct SvrBEnv<'a>(EnclaveEndpoint<'a, SvrSgx>);
+const SVRB_ENV_MAX_PREVIOUS: usize = 3;
+
+pub struct SvrBEnv<'a> {
+    current: EnclaveEndpoint<'a, SvrSgx>,
+    // There may be differing numbers of previous endpoints in staging vs prod,
+    // so rather than store a fixed-sized array of previous, we store
+    // a max-sized list of Options, which are often None but can be set.
+    // Thus, if staging has 2 and prod has 1, they can set [foo, bar, None] and
+    // [baz, None, None] respectively.
+    previous: [Option<EnclaveEndpoint<'a, SvrSgx>>; SVRB_ENV_MAX_PREVIOUS],
+}
 
 impl<'a> SvrBEnv<'a> {
-    pub const fn new(sgx: EnclaveEndpoint<'a, SvrSgx>) -> Self {
-        Self(sgx)
+    pub const fn new(
+        current: EnclaveEndpoint<'a, SvrSgx>,
+        previous: [Option<EnclaveEndpoint<'a, SvrSgx>>; SVRB_ENV_MAX_PREVIOUS],
+    ) -> Self {
+        Self { current, previous }
     }
 
-    #[inline]
-    pub const fn sgx(&self) -> &EnclaveEndpoint<'a, SvrSgx> {
-        &self.0
+    pub const fn current(&self) -> &EnclaveEndpoint<'a, SvrSgx> {
+        &self.current
+    }
+
+    pub fn previous(&self) -> impl std::iter::Iterator<Item = &EnclaveEndpoint<'a, SvrSgx>> {
+        self.previous.iter().filter_map(|a| a.as_ref())
+    }
+
+    pub fn current_and_previous(
+        &self,
+    ) -> impl std::iter::Iterator<Item = &EnclaveEndpoint<'a, SvrSgx>> {
+        std::iter::once(&self.current).chain(self.previous.iter().filter_map(|a| a.as_ref()))
     }
 }
 
 pub struct Env<'a> {
     pub cdsi: EnclaveEndpoint<'a, Cdsi>,
     pub svr2: EnclaveEndpoint<'a, SvrSgx>,
-    pub svr_b: Option<SvrBEnv<'a>>, // TODO: once svrB is available in all environments, make this no longer optional.
+    pub svr_b: SvrBEnv<'a>,
     pub chat_domain_config: DomainConfig,
+    pub chat_ws_config: ws::Config,
     pub keytrans_config: KeyTransConfig,
+    pub chat_noise_config: Option<NoiseDomainConfig>,
+}
+
+/// Noise analog of [`DomainConfig`].
+// TODO combine with other version when using Noise connections for real.
+pub struct NoiseDomainConfig {
+    /// The portions of the config used during connection attempts.
+    pub connect: NoiseConnectionConfig,
+    /// Static IPv4 addresses to try if domain name resolution fails.
+    pub ip_v4: &'static [Ipv4Addr],
+    /// Static IPv6 addresses to try if domain name resolution fails.
+    pub ip_v6: &'static [Ipv6Addr],
+}
+/// Noise analog of [`ConnectionConfig`].
+// TODO combine with other version when using Noise connections for real.
+#[derive(Copy, Clone)]
+pub struct NoiseConnectionConfig {
+    /// The domain name of the resource.
+    pub hostname: &'static str,
+    /// The port for the resource.
+    pub port: NonZeroU16,
+    /// The server's public key.
+    pub server_public_key: &'static crate::chat::noise::ServerPublicKey,
 }
 
 impl<'a> Env<'a> {
@@ -551,44 +646,76 @@ impl<'a> Env<'a> {
             cdsi,
             svr2,
             chat_domain_config,
-            ..
+            svr_b,
+            chat_noise_config,
+            chat_ws_config: _,
+            keytrans_config: _,
         } = self;
-        HashMap::from([
-            cdsi.domain_config.static_fallback(),
-            svr2.domain_config.static_fallback(),
-            chat_domain_config.static_fallback(),
-        ])
+
+        let svrb_static_fallbacks = svr_b
+            .current_and_previous()
+            .map(|enclave_endpoint| enclave_endpoint.domain_config.static_fallback());
+
+        HashMap::from_iter(
+            [
+                cdsi.domain_config.static_fallback(),
+                svr2.domain_config.static_fallback(),
+                chat_domain_config.static_fallback(),
+            ]
+            .into_iter()
+            .chain(svrb_static_fallbacks)
+            .chain(chat_noise_config.as_ref().map(|n| n.static_fallback())),
+        )
     }
 }
 
 pub const STAGING: Env<'static> = Env {
     chat_domain_config: DOMAIN_CONFIG_CHAT_STAGING,
+    chat_noise_config: Some(DOMAIN_CONFIG_CHAT_NOISE_STAGING),
+    chat_ws_config: RECOMMENDED_WS_CONFIG,
     cdsi: EnclaveEndpoint {
         domain_config: DOMAIN_CONFIG_CDSI_STAGING,
+        ws_config: RECOMMENDED_WS_CONFIG,
         params: ENDPOINT_PARAMS_CDSI_STAGING,
     },
     svr2: EnclaveEndpoint {
         domain_config: DOMAIN_CONFIG_SVR2_STAGING,
+        ws_config: RECOMMENDED_WS_CONFIG,
         params: ENDPOINT_PARAMS_SVR2_STAGING,
     },
-    svr_b: Some(SvrBEnv(EnclaveEndpoint {
-        domain_config: DOMAIN_CONFIG_SVRB_STAGING,
-        params: ENDPOINT_PARAMS_SVRB_STAGING,
-    })),
+    svr_b: SvrBEnv {
+        current: EnclaveEndpoint {
+            domain_config: DOMAIN_CONFIG_SVRB_STAGING,
+            ws_config: RECOMMENDED_WS_CONFIG,
+            params: ENDPOINT_PARAMS_SVRB_STAGING,
+        },
+        previous: [None, None, None],
+    },
     keytrans_config: KEYTRANS_CONFIG_STAGING,
 };
 
 pub const PROD: Env<'static> = Env {
     chat_domain_config: DOMAIN_CONFIG_CHAT,
+    chat_noise_config: None,
+    chat_ws_config: RECOMMENDED_WS_CONFIG,
     cdsi: EnclaveEndpoint {
         domain_config: DOMAIN_CONFIG_CDSI,
+        ws_config: RECOMMENDED_WS_CONFIG,
         params: ENDPOINT_PARAMS_CDSI_PROD,
     },
     svr2: EnclaveEndpoint {
         domain_config: DOMAIN_CONFIG_SVR2,
+        ws_config: RECOMMENDED_WS_CONFIG,
         params: ENDPOINT_PARAMS_SVR2_PROD,
     },
-    svr_b: None,
+    svr_b: SvrBEnv {
+        current: EnclaveEndpoint {
+            domain_config: DOMAIN_CONFIG_SVRB_PROD,
+            ws_config: RECOMMENDED_WS_CONFIG,
+            params: ENDPOINT_PARAMS_SVRB_PROD,
+        },
+        previous: [None, None, None],
+    },
     keytrans_config: KEYTRANS_CONFIG_PROD,
 };
 
